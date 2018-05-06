@@ -4,13 +4,9 @@
 
 mod model;
 
-use model::{Puzzle, TileState};
+use model::Puzzle;
 
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
-    }
 }
