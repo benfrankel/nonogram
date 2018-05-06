@@ -7,14 +7,14 @@ pub enum TileState {
 type LineHints = Vec<usize>;
 type PuzzleState = Vec<Vec<TileState>>;
 
-pub struct Puzzle {
-    row_hints: Vec<LineHints>,
-    col_hints: Vec<LineHints>,
+pub struct Puzzle<'a> {
+    row_hints: &'a Vec<LineHints>,
+    col_hints: &'a Vec<LineHints>,
     grid: PuzzleState,
 }
 
-impl Puzzle {
-    pub fn new(row_hints: Vec<LineHints>, col_hints: Vec<LineHints>) -> Self {
+impl<'a> Puzzle<'a> {
+    pub fn new(row_hints: &'a Vec<LineHints>, col_hints: &'a Vec<LineHints>) -> Self {
         let w = col_hints.len();
         let h = row_hints.len();
 
@@ -66,10 +66,6 @@ impl PuzzleBuilder {
     }
 
     pub fn gen(&self) -> Puzzle {
-        Puzzle::new(self.row_hints.clone(), self.col_hints.clone())
-    }
-
-    pub fn freeze(self) -> Puzzle {
         Puzzle::new(self.row_hints, self.col_hints)
     }
 }
