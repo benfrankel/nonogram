@@ -45,8 +45,8 @@ impl fmt::Display for TileState {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             &TileState::Unknown  => write!(f, " "),
-            &TileState::Empty    => write!(f, "X"),
-            &TileState::Occupied => write!(f, "O"),
+            &TileState::Empty    => write!(f, "x"),
+            &TileState::Occupied => write!(f, "█"),
         }
     }
 }
@@ -55,12 +55,27 @@ impl<'a> fmt::Display for PuzzleGrid<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut s = "".to_owned();
 
+        s.push('┌');
+        for _ in 0..self.w() {
+            s.push('─');
+        }
+        s.push('┐');
+
+        s.push('\n');
         for i in 0..self.h() {
+            s.push('│');
             for j in 0..self.w() {
                 s.push_str(&format!("{}", self.grid[i][j]));
             }
+            s.push('│');
             s.push('\n');
         }
+
+        s.push('└');
+        for _ in 0..self.w() {
+            s.push('─');
+        }
+        s.push('┘');
 
         write!(f, "{}", s)
     }
@@ -128,7 +143,7 @@ mod tests {
     }
 
     #[test]
-    fn new_puzzle_grid_all_tiles_are_unknown() {
+    fn new_puzzle_grid_only_has_unknown_tiles() {
         let puzzle = Puzzle::new()
             .row(vec!(5))
             .row(vec!(1))
@@ -143,10 +158,10 @@ mod tests {
 
         let grid = puzzle.gen();
 
-        for row in grid.grid {
-            for tile in row {
+        for row in grid.grid.iter() {
+            for tile in row.iter() {
                 assert!((match tile {
-                    TileState::Unknown => true,
+                    &TileState::Unknown => true,
                     _ => false,
                 }));
             }
