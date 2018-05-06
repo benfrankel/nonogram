@@ -1,43 +1,22 @@
-pub enum TileState<T> {
+pub enum TileState {
     Unknown,
     Empty,
-    Full(T),
+    Occupied,
 }
 
-type LineHints<T> = Vec<(usize, T)>;
+type LineHints = Vec<usize>;
+type PuzzleState = Vec<Vec<TileState>>;
 
-pub struct Puzzle<'a, T: 'a> {
-    row_hints: &'a Vec<LineHints<T>>,
-    col_hints: &'a Vec<LineHints<T>>,
-    grid: Vec<Vec<TileState<T>>>,
+pub struct Puzzle {
+    row_hints: Vec<LineHints>,
+    col_hints: Vec<LineHints>,
+    grid: PuzzleState,
 }
 
-pub struct PuzzleTemplate<T> {
-    row_hints: Vec<LineHints<T>>,
-    col_hints: Vec<LineHints<T>>,
-}
-
-impl<T> PuzzleTemplate<T> {
-    pub fn new() -> Self {
-        PuzzleTemplate {
-            row_hints: Vec::new(),
-            col_hints: Vec::new(),
-        }
-    }
-
-    pub fn row(&mut self, row: LineHints<T>) -> &mut Self {
-        self.row_hints.push(row);
-        self
-    }
-
-    pub fn col(&mut self, col: LineHints<T>) -> &mut Self {
-        self.col_hints.push(col);
-        self
-    }
-
-    pub fn gen(&self) -> Puzzle<T> {
-        let w = self.col_hints.len();
-        let h = self.row_hints.len();
+impl Puzzle {
+    pub fn new(row_hints: Vec<LineHints>, col_hints: Vec<LineHints>) -> Self {
+        let w = col_hints.len();
+        let h = row_hints.len();
 
         let mut grid = Vec::with_capacity(h);
         for i in 0..h {
@@ -48,14 +27,12 @@ impl<T> PuzzleTemplate<T> {
         }
 
         Puzzle {
-            row_hints: &self.row_hints,
-            col_hints: &self.col_hints,
+            row_hints,
+            col_hints,
             grid,
         }
     }
-}
 
-impl<'a, T> Puzzle<'a, T> {
     pub fn w(&self) -> usize {
         self.col_hints.len()
     }
@@ -65,17 +42,35 @@ impl<'a, T> Puzzle<'a, T> {
     }
 }
 
-struct Full;
+pub struct PuzzleBuilder {
+    row_hints: Vec<LineHints>,
+    col_hints: Vec<LineHints>,
+}
 
-impl PuzzleTemplate<Full> {
-    pub fn push_row(&mut self, row: Vec<usize>) -> Self {
+impl PuzzleBuilder {
+    pub fn new() -> Self {
+        PuzzleBuilder {
+            row_hints: Vec::new(),
+            col_hints: Vec::new(),
+        }
+    }
+
+    pub fn row(mut self, row: LineHints) -> Self {
         self.row_hints.push(row);
         self
     }
 
-    pub fn push_col(&mut self, col: Vec<usize>) -> Self {
+    pub fn col(mut self, col: LineHints) -> Self {
         self.col_hints.push(col);
         self
+    }
+
+    pub fn gen(&self) -> Puzzle {
+        Puzzle::new(self.row_hints.clone(), self.col_hints.clone())
+    }
+
+    pub fn freeze(self) -> Puzzle {
+        Puzzle::new(self.row_hints, self.col_hints)
     }
 }
 
