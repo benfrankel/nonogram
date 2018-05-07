@@ -1,34 +1,30 @@
 use std::fmt;
 
+use ndarray::{Array2, ArrayViewMut1};
 
+
+#[derive(Clone, PartialEq)]
 pub enum TileState {
     Unknown,
     Empty,
     Occupied,
 }
 
-type LineHints = Vec<usize>;
-type GridState = Vec<Vec<TileState>>;
-
 pub struct PuzzleGrid<'a> {
     puzzle: &'a Puzzle,
-    grid: GridState,
+    grid: Array2<TileState>,
+}
+
+pub struct PuzzleLine<'a> {
+    pub hints: &'a LineHints,
+    pub line: ArrayViewMut1<'a, TileState>,
 }
 
 impl<'a> PuzzleGrid<'a> {
     pub fn new(puzzle: &'a Puzzle) -> Self {
-        let mut grid = Vec::with_capacity(puzzle.h());
-
-        for i in 0..puzzle.h() {
-            grid.push(Vec::with_capacity(puzzle.w()));
-            for _ in 0..puzzle.w() {
-                grid[i].push(TileState::Unknown);
-            }
-        }
-
         PuzzleGrid {
             puzzle,
-            grid,
+            grid: Array2::from_elem((puzzle.h(), puzzle.w()), TileState::Unknown),
         }
     }
 
@@ -39,15 +35,47 @@ impl<'a> PuzzleGrid<'a> {
     pub fn h(&self) -> usize {
         self.puzzle.h()
     }
+
+    pub fn row(&mut self, i: usize) -> PuzzleLine {
+        PuzzleLine {
+            hints: &self.puzzle.row_hints[i],
+            line: self.grid.slice_mut(s![i, ..])
+        }
+    }
+
+    pub fn col(&mut self, j: usize) -> PuzzleLine {
+        PuzzleLine {
+            hints: &self.puzzle.col_hints[j],
+            line: self.grid.slice_mut(s![.., j])
+        }
+    }
 }
 
 impl fmt::Display for TileState {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            &TileState::Unknown  => write!(f, " "),
-            &TileState::Empty    => write!(f, "x"),
-            &TileState::Occupied => write!(f, "█"),
+        match *self {
+            TileState::Unknown  => write!(f, " "),
+            TileState::Empty    => write!(f, "x"),
+            TileState::Occupied => write!(f, "█"),
         }
+    }
+}
+
+impl<'a> fmt::Display for PuzzleLine<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut s = "".to_owned();
+
+        s.push('|');
+        for tile in self.line.iter() {
+            s.push_str(&format!("{}", tile));
+        }
+        s.push('|');
+
+        for hint in self.hints.iter() {
+            s.push_str(&format!(" {}", hint));
+        }
+
+        write!(f, "{}", s)
     }
 }
 
@@ -62,10 +90,10 @@ impl<'a> fmt::Display for PuzzleGrid<'a> {
         s.push('┐');
 
         s.push('\n');
-        for i in 0..self.h() {
+        for row in self.grid.outer_iter() {
             s.push('│');
-            for j in 0..self.w() {
-                s.push_str(&format!("{}", self.grid[i][j]));
+            for tile in row.iter() {
+                s.push_str(&format!("{}", tile));
             }
             s.push('│');
             s.push('\n');
@@ -80,6 +108,8 @@ impl<'a> fmt::Display for PuzzleGrid<'a> {
         write!(f, "{}", s)
     }
 }
+
+pub type LineHints = Vec<usize>;
 
 pub struct Puzzle {
     row_hints: Vec<LineHints>,
@@ -143,7 +173,7 @@ mod tests {
     }
 
     #[test]
-    fn new_puzzle_grid_only_has_unknown_tiles() {
+    fn new_puzzle_grid_has_all_unknown_tiles() {
         let puzzle = Puzzle::new()
             .row(vec!(5))
             .row(vec!(1))
@@ -158,13 +188,11 @@ mod tests {
 
         let grid = puzzle.gen();
 
-        for row in grid.grid.iter() {
-            for tile in row.iter() {
-                assert!((match tile {
-                    &TileState::Unknown => true,
-                    _ => false,
-                }));
-            }
+        for tile in grid.grid.iter() {
+            assert!(match *tile {
+                TileState::Unknown => true,
+                _ => false,
+            });
         }
     }
 }

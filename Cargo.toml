@@ -4,4 +4,4 @@ version = "0.1.0"
 authors = ["Ben Frankel <ben.frankel7@gmail.com>"]
 
 [dependencies]
-# clap = "2.30.0"
+ndarray = "0.11.0"
