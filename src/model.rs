@@ -1,126 +1,132 @@
 use std::fmt;
+use std::iter::Map;
 
 use ndarray::{Array2, ArrayViewMut1};
 
 
-#[derive(Clone, PartialEq)]
-pub enum TileState {
-    Unknown,
-    Empty,
-    Occupied,
-}
-
-pub struct PuzzleGrid<'a> {
-    puzzle: &'a Puzzle,
-    grid: Array2<TileState>,
-}
-
-pub struct PuzzleLine<'a> {
-    pub hints: &'a LineHints,
-    pub line: ArrayViewMut1<'a, TileState>,
-}
-
-impl<'a> PuzzleGrid<'a> {
-    pub fn new(puzzle: &'a Puzzle) -> Self {
-        PuzzleGrid {
-            puzzle,
-            grid: Array2::from_elem((puzzle.h(), puzzle.w()), TileState::Unknown),
-        }
-    }
-
-    pub fn w(&self) -> usize {
-        self.puzzle.w()
-    }
-
-    pub fn h(&self) -> usize {
-        self.puzzle.h()
-    }
-
-    pub fn row(&mut self, i: usize) -> PuzzleLine {
-        PuzzleLine {
-            hints: &self.puzzle.row_hints[i],
-            line: self.grid.slice_mut(s![i, ..])
-        }
-    }
-
-    pub fn col(&mut self, j: usize) -> PuzzleLine {
-        PuzzleLine {
-            hints: &self.puzzle.col_hints[j],
-            line: self.grid.slice_mut(s![.., j])
-        }
-    }
-}
-
-impl fmt::Display for TileState {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            TileState::Unknown  => write!(f, " "),
-            TileState::Empty    => write!(f, "x"),
-            TileState::Occupied => write!(f, "█"),
-        }
-    }
-}
-
-impl<'a> fmt::Display for PuzzleLine<'a> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let mut s = "".to_owned();
-
-        s.push('|');
-        for tile in self.line.iter() {
-            s.push_str(&format!("{}", tile));
-        }
-        s.push('|');
-
-        for hint in self.hints.iter() {
-            s.push_str(&format!(" {}", hint));
-        }
-
-        write!(f, "{}", s)
-    }
-}
-
-impl<'a> fmt::Display for PuzzleGrid<'a> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let mut s = "".to_owned();
-
-        s.push('┌');
-        for _ in 0..self.w() {
-            s.push('─');
-        }
-        s.push('┐');
-
-        s.push('\n');
-        for row in self.grid.outer_iter() {
-            s.push('│');
-            for tile in row.iter() {
-                s.push_str(&format!("{}", tile));
-            }
-            s.push('│');
-            s.push('\n');
-        }
-
-        s.push('└');
-        for _ in 0..self.w() {
-            s.push('─');
-        }
-        s.push('┘');
-
-        write!(f, "{}", s)
-    }
-}
-
-pub type LineHints = Vec<usize>;
-
 pub struct Puzzle {
-    row_hints: Vec<LineHints>,
-    col_hints: Vec<LineHints>,
+    row_hints: Vec<Vec<usize>>,
+    col_hints: Vec<Vec<usize>>,
 }
+
+#[derive(Clone, PartialEq)]
+pub enum Square {
+    Empty,
+    Full,
+}
+
+type Grid = Array2<Square>;
+
+#[derive(Clone, Hash, PartialEq, Eq)]
+pub enum LineIndex {
+    Row(usize),
+    Col(usize),
+}
+
+impl LineIndex {
+    pub fn line_through(&self, k: usize) -> LineIndex {
+        match self {
+            LineIndex::Row(i) => LineIndex::Col(k),
+            LineIndex::Col(j) => LineIndex::Row(k),
+        }
+    }
+}
+
+struct LineIndexIterator {
+    w: usize,
+    h: usize,
+    li: Option<LineIndex>,
+}
+
+impl<'a> Iterator for LineIndexIterator {
+    type Item = LineIndex;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.li {
+            None => None,
+            Some(li) => {
+                self.li = match li {
+                    LineIndex::Row(i) if i + 1 < self.h => Some(LineIndex::Row(i + 1)),
+                    LineIndex::Row(i) if i + 1 == self.h => Some(LineIndex::Col(0)),
+                    LineIndex::Col(j) if j + 1 < self.w => Some(LineIndex::Col(j + 1)),
+                    LineIndex::Col(j) if j + 1 == self.w => None,
+                };
+
+                Some(li)
+            }
+        }
+    }
+}
+
+impl fmt::Display for Square {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Square::Empty => write!(f, "x"),
+            Square::Full  => write!(f, "█"),
+        }
+    }
+}
+
+//impl<'a> fmt::Display for PuzzleLineViewMut<'a> {
+//    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+//        let mut s = "".to_owned();
+//
+//        s.push('|');
+//        for tile in self.line.iter() {
+//            s.push_str(&format!("{}", tile));
+//        }
+//        s.push('|');
+//
+//        for hint in self.hints.iter() {
+//            s.push_str(&format!(" {}", hint));
+//        }
+//
+//        write!(f, "{}", s)
+//    }
+//}
+
+//impl<'a> fmt::Display for PuzzleGrid<'a> {
+//    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+//        let mut s = "".to_owned();
+//
+//        s.push('┌');
+//        for _ in 0..self.w() {
+//            s.push('─');
+//        }
+//        s.push('┐');
+//
+//        s.push('\n');
+//        for row in self.grid.outer_iter() {
+//            s.push('│');
+//            for tile in row.iter() {
+//                s.push_str(&format!("{}", tile));
+//            }
+//            s.push('│');
+//            s.push('\n');
+//        }
+//
+//        s.push('└');
+//        for _ in 0..self.w() {
+//            s.push('─');
+//        }
+//        s.push('┘');
+//
+//        write!(f, "{}", s)
+//    }
+//}
 
 impl Puzzle {
     pub fn new() -> Self {
         Puzzle {
             row_hints: Vec::new(),
             col_hints: Vec::new(),
+        }
+    }
+
+    pub fn with_capacity(w: usize, h: usize) -> Self {
+        Puzzle {
+            row_hints: Vec::with_capacity(h),
+            col_hints: Vec::with_capacity(w),
         }
     }
 
@@ -132,18 +138,30 @@ impl Puzzle {
         self.row_hints.len()
     }
 
-    pub fn row(mut self, row: LineHints) -> Self {
-        self.row_hints.push(row);
+    pub fn push_row(self, hints: Vec<usize>) -> Self {
+        self.row_hints.push(hints);
         self
     }
 
-    pub fn col(mut self, col: LineHints) -> Self {
-        self.col_hints.push(col);
+    pub fn push_col(self, hints: Vec<usize>) -> Self {
+        self.col_hints.push(hints);
         self
     }
 
-    pub fn gen(&self) -> PuzzleGrid {
-        PuzzleGrid::new(&self)
+    pub fn line(&self, li: LineIndex) -> &[usize] {
+        match li {
+            LineIndex::Row(i) => &self.row_hints[i],
+            LineIndex::Col(j) => &self.col_hints[j],
+        }
+    }
+
+    pub fn index_iter(&self) -> LineIndexIterator {
+        // FIXME: Require that Row(0) is valid (>= 1 rows)
+        LineIndexIterator {
+            w: self.w(),
+            h: self.h(),
+            li: Some(LineIndex::Row(0)),
+        }
     }
 }
 
@@ -155,44 +173,18 @@ mod tests {
     #[test]
     fn new_puzzle_grid_has_correct_dimensions() {
         let puzzle = Puzzle::new()
-            .row(vec!(5))
-            .row(vec!(1))
-            .row(vec!(5))
-            .row(vec!(1))
-            .row(vec!(5))
-            .col(vec!(3, 1))
-            .col(vec!(1, 1, 1))
-            .col(vec!(1, 1, 1))
-            .col(vec!(1, 1, 1))
-            .col(vec!(1, 3));
-
-        let grid = puzzle.gen();
+            .push_row(vec!(5))
+            .push_row(vec!(1))
+            .push_row(vec!(5))
+            .push_row(vec!(1))
+            .push_row(vec!(5))
+            .push_col(vec!(3, 1))
+            .push_col(vec!(1, 1, 1))
+            .push_col(vec!(1, 1, 1))
+            .push_col(vec!(1, 1, 1))
+            .push_col(vec!(1, 3));
 
         assert_eq!(puzzle.w(), 5);
         assert_eq!(puzzle.h(), 5);
-    }
-
-    #[test]
-    fn new_puzzle_grid_has_all_unknown_tiles() {
-        let puzzle = Puzzle::new()
-            .row(vec!(5))
-            .row(vec!(1))
-            .row(vec!(5))
-            .row(vec!(1))
-            .row(vec!(5))
-            .col(vec!(3, 1))
-            .col(vec!(1, 1, 1))
-            .col(vec!(1, 1, 1))
-            .col(vec!(1, 1, 1))
-            .col(vec!(1, 3));
-
-        let grid = puzzle.gen();
-
-        for tile in grid.grid.iter() {
-            assert!(match *tile {
-                TileState::Unknown => true,
-                _ => false,
-            });
-        }
     }
 }
