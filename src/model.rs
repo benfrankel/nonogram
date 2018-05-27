@@ -12,7 +12,7 @@ pub struct Puzzle {
     col_hints: Vec<Vec<usize>>,
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Square {
     Empty,
     Full,
@@ -30,6 +30,7 @@ impl<T> Grid<T> {
     pub fn h(&self) -> usize {
         self.0.len_of(Axis(0))
     }
+
     pub fn w(&self) -> usize {
         self.0.len_of(Axis(1))
     }

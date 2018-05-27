@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
 use std::cmp::{min, max};
 
@@ -20,95 +20,107 @@ enum SolverError {
 }
 
 #[derive(Clone, PartialEq, Eq)]
-enum Partial<T> {
+enum PartialSquare {
     Unknown,
-    Known(T),
+    Known(Square),
 }
 
-impl<T> Partial<T> {
-    fn collapse(self) -> T {
+impl PartialSquare {
+    fn collapse(self) -> Square {
         match self {
-            Partial::Unknown => panic!("Cannot collapse Partial::Unknown"),
-            Partial::Known(inner) => inner,
+            PartialSquare::Unknown => panic!("Cannot collapse Partial::Unknown"),
+            PartialSquare::Known(inner) => inner,
         }
+    }
+
+    fn is_known(&self) -> bool {
+        match self {
+            PartialSquare::Unknown => false,
+            PartialSquare::Known(_) => true,
+        }
+    }
+
+    fn reveal(&mut self, x: Square) -> bool {
+        let res = match *self {
+            PartialSquare::Known(old) if old == x => false,
+            _ => true,
+        };
+
+        *self = PartialSquare::Known(x);
+
+        res
     }
 }
 
-impl fmt::Display for Partial<Square> {
+impl fmt::Display for PartialSquare {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Partial::Unknown  => write!(f, " "),
-            Partial::Known(s) => write!(f, "{}", s),
+            PartialSquare::Unknown  => write!(f, " "),
+            PartialSquare::Known(s) => write!(f, "{}", s),
         }
     }
 }
 
-// The final run of full squares must be:
-// - A subset   of [lo, hi) if bound is Some((lo, hi))
-// - A superset of [lo, hi) if found is Some((lo, hi))
 #[derive(Clone)]
 struct PartialRun {
-    bound: Option<(usize, usize)>,
-    found: Option<(usize, usize)>,
+    lo: usize,
+    hi: usize,
 }
 
 impl PartialRun {
     pub fn new() -> Self {
         PartialRun {
-            bound: None,
-            found: None,
+            lo: 0,
+            hi: usize::max_value(),
         }
     }
 
-    fn update_bound(&mut self, lo: usize, hi: usize) {
-        if lo >= hi {
-            return;
-        }
-
-        self.bound = match self.bound {
-            None => Some((lo, hi)),
-            Some((old_lo, old_hi)) => Some((max(old_lo, lo), min(old_hi, hi))),
-        }
-    }
-
-    fn update_found(&mut self, lo: usize, hi: usize) {
-        if lo >= hi {
-            return;
-        }
-
-        self.found = match self.found {
-            None => Some((lo, hi)),
-            Some((old_lo, old_hi)) => Some((min(old_lo, lo), max(old_hi, hi))),
-        }
+    fn update(&mut self, lo: usize, hi: usize) {
+        self.lo = max(self.lo, lo);
+        self.hi = min(self.hi, hi);
     }
 }
 
 struct PartialLine<'a> {
     hints: &'a [usize],
     runs: &'a mut [PartialRun],
-    line: ArrayViewMut1<'a, Partial<Square>>,
-    // index: LineIndex
+    line: ArrayViewMut1<'a, PartialSquare>,
+    dirty: HashSet<usize>,
 }
 
-#[derive(PartialEq, Eq, Debug)]
-struct DeductionStep {
-    li: LineIndex,
-    changes: Vec<usize>,
-}
+impl<'a> PartialLine<'a> {
+    fn reveal(&mut self, i: usize, x: Square) {
+        if self.line[i].reveal(x) {
+            self.dirty.insert(i);
+        }
+    }
 
-struct Solver {
-    deductions: Vec<Box<Fn(PartialLine) -> Option<Vec<usize>>>>,
-}
+    fn reveal_all<I>(&mut self, bag: I, x: Square)
+        where I: IntoIterator<Item = usize> {
+        for i in bag.into_iter() {
+            self.reveal(i, x);
+        }
+    }
 
-type Solution = Vec<DeductionStep>;
+    fn reveal_run(&mut self, run_index: usize, lo: usize, hi: usize) {
+        self.reveal_all(lo..hi, Square::Full);
+
+        if hi > self.hints[run_index] {
+            self.runs[run_index].update(hi - self.hints[run_index],
+                                        lo + self.hints[run_index]);
+        } else {
+            self.runs[run_index].update(0,
+                                        lo + self.hints[run_index]);
+        }
+    }
+}
 
 struct SolverWorker<'a> {
     solver: &'a Solver,
     puzzle: &'a Puzzle,
-    grid: Grid<Partial<Square>>,
-    dirty: HashMap<LineIndex, bool>,
+    grid: Grid<PartialSquare>,
+    queue: VecDeque<LineIndex>,
     runs: HashMap<LineIndex, Vec<PartialRun>>,
-    steps: Solution,
 
     // Keep track of other solved features (ex., some tile is part of some run)
     // Deductions should be able to accept extra features
@@ -117,63 +129,95 @@ struct SolverWorker<'a> {
 
 impl<'a> SolverWorker<'a> {
     fn new(solver: &'a Solver, puzzle: &'a Puzzle) -> SolverWorker<'a> {
-        let mut dirty = HashMap::with_capacity(puzzle.w() + puzzle.h());
+        let mut queue = VecDeque::with_capacity(puzzle.w() + puzzle.h());
         let mut runs = HashMap::with_capacity(puzzle.w() + puzzle.h());
 
         for li in puzzle.index_iter() {
-            dirty.insert(li, true);
+            queue.push_back(li);
             runs.insert(li, vec![PartialRun::new(); puzzle.hints(li).len()]);
         }
 
         SolverWorker {
             solver,
             puzzle,
-            grid: Grid(Array2::from_elem((puzzle.h(), puzzle.w()), Partial::Unknown)),
-            dirty,
+            grid: Grid(Array2::from_elem((puzzle.h(), puzzle.w()), PartialSquare::Unknown)),
+            queue,
             runs,
-            steps: Vec::new(),
         }
     }
 
-    fn line(&mut self, li: LineIndex) -> PartialLine {
+    fn line(puzzle: &'a Puzzle,
+            runs: &'a mut HashMap<LineIndex, Vec<PartialRun>>,
+            grid: &'a mut Grid<PartialSquare>,
+            li: LineIndex) -> PartialLine<'a> {
         PartialLine {
-            hints: self.puzzle.hints(li),
-            runs: self.runs.get_mut(&li).unwrap(),
-            line: self.grid.line(li),
+            hints: puzzle.hints(li),
+            runs: runs.get_mut(&li).unwrap(),
+            line: grid.line(li),
+            dirty: HashSet::new(),
         }
     }
 
-    fn step(&mut self) -> Result<DeductionStep, SolverError> {
-        for li in self.puzzle.index_iter() {
-            for deduction in self.solver.deductions.iter() {
-                if let Some(changes) = deduction(self.line(li)) {
-                    for &change in changes.iter() {
-                        self.dirty.entry(li.line_through(change)).or_insert(true);
-                    }
+    fn verify(&self) -> SolverError {
+        // TODO: Possibly return SolverError::Invalid (that is, perform validation!)
 
-                    return Ok(DeductionStep { li, changes });
+        if self.grid.0.iter().any(|x| *x == PartialSquare::Unknown) {
+            SolverError::Stuck
+        } else {
+            SolverError::Solved
+        }
+    }
+
+    fn step(&mut self) -> Result<(), SolverError> {
+        while let Some(li) = self.queue.pop_front() {
+            let mut line = SolverWorker::line(self.puzzle, &mut self.runs, &mut self.grid, li);
+
+            loop {
+                let num_reveals = line.dirty.len();
+
+                for deduction in &self.solver.deductions {
+                    deduction(&mut line);
                 }
+
+                if line.dirty.len() == num_reveals {
+                    break;
+                }
+            }
+
+            if !line.dirty.is_empty() {
+                self.queue.extend(line.dirty
+                    .into_iter()
+                    .map(move |i| li.line_through(i)));
+
+                return Ok(())
             }
         }
 
-        Err(SolverError::Stuck)
+        Err(self.verify())
     }
 
-    fn solve(mut self) -> Result<Solution, SolverError> {
+    fn solve(mut self) -> Result<(), SolverError> {
         loop {
+            println!("{}", self.grid);
+
             match self.step() {
-                Ok(step) => self.steps.push(step),
-                Err(SolverError::Solved) => return Ok(self.steps),
+                Err(SolverError::Solved) => return Ok(()),
                 Err(e) => return Err(e),
+                _ => (),
             }
         }
     }
 }
 
+pub struct Solver {
+    deductions: Vec<Box<Fn(&mut PartialLine)>>,
+}
+
 impl Solver {
     fn new() -> Self {
         Solver {
-            deductions: vec![Box::new(deduce_overlap)],
+            deductions: vec![Box::new(deduce_overlap),
+                             Box::new(deduce_run_gaps)],
         }
     }
 
@@ -182,36 +226,43 @@ impl Solver {
     }
 }
 
-fn deduce_overlap(partial: PartialLine) -> Option<Vec<usize>> {
-    let mut changes = Vec::new();
 
-    let hints = partial.hints;
-    let mut line = partial.line;
-
-    let span = hints.iter().sum::<usize>() + hints.len() - 1;
-    let flexibility = line.len() - span;
+fn deduce_overlap(partial: &mut PartialLine) {
+    let gap_span = if partial.hints.is_empty() { 0 } else { partial.hints.len() - 1 };
+    let span = partial.hints.iter().sum::<usize>() + gap_span;
+    let flexibility = partial.line.len() - span;
 
     let mut left = 0;
-    for (i, hint) in hints.iter().enumerate() {
+    for (i, hint) in partial.hints.iter().enumerate() {
         let lo = left + flexibility;
         let hi = left + hint;
 
-        partial.runs[i].update_found(lo, hi);
-
-        for j in lo..hi {
-            if line[j] != Partial::Known(Square::Full) {
-                line[j] = Partial::Known(Square::Full);
-                changes.push(j);
-            }
+        if lo < hi {
+            partial.reveal_run(i, lo, hi);
         }
 
         left = hi + 1;
     }
+}
 
-    if changes.is_empty() {
-        None
+fn deduce_run_gaps(partial: &mut PartialLine) {
+    let end = partial.line.len();
+
+    if partial.runs.is_empty() {
+        partial.reveal_all(0..end, Square::Empty);
     } else {
-        Some(changes)
+        let lo = partial.runs.first().unwrap().lo;
+        let hi = partial.runs.last().unwrap().hi;
+
+        partial.reveal_all(0..lo, Square::Empty);
+        partial.reveal_all(hi..end, Square::Empty);
+
+        for i in 0..partial.runs.len() - 1 {
+            let lo = partial.runs[i].hi;
+            let hi = partial.runs[i + 1].lo;
+
+            partial.reveal_all(lo..hi, Square::Empty);
+        }
     }
 }
 
@@ -221,7 +272,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn overlap_solves_easy_puzzle() {
+    fn easy_puzzle_snake() {
         let puzzle = Puzzle::new()
             .push_row(vec!(5))
             .push_row(vec!(1))
@@ -235,36 +286,69 @@ mod tests {
             .push_col(vec!(1, 3));
 
         let solver = Solver::new();
-        let mut worker = solver.delegate(&puzzle);
+        let worker = solver.delegate(&puzzle);
 
-        assert_eq!(worker.step(), Ok(DeductionStep {
-            li: LineIndex::Row(0),
-            changes: vec![0, 1, 2, 3, 4]
-        }));
+        assert!(worker.solve().is_ok());
+    }
 
-        assert_eq!(worker.step(), Ok(DeductionStep {
-            li: LineIndex::Row(2),
-            changes: vec![0, 1, 2, 3, 4]
-        }));
+    #[test]
+    fn easy_puzzle_checkerboard() {
+        let puzzle = Puzzle::new()
+            .push_row(vec!(1, 1, 1))
+            .push_row(vec!(1, 1))
+            .push_row(vec!(1, 1, 1))
+            .push_row(vec!(1, 1))
+            .push_row(vec!(1, 1, 1))
+            .push_col(vec!(1, 1, 1))
+            .push_col(vec!(1, 1))
+            .push_col(vec!(1, 1, 1))
+            .push_col(vec!(1, 1))
+            .push_col(vec!(1, 1, 1));
 
-        assert_eq!(worker.step(), Ok(DeductionStep {
-            li: LineIndex::Row(4),
-            changes: vec![0, 1, 2, 3, 4]
-        }));
+        let solver = Solver::new();
+        let worker = solver.delegate(&puzzle);
 
-        assert_eq!(worker.step(), Ok(DeductionStep {
-            li: LineIndex::Col(0),
-            changes: vec![1]
-        }));
+        assert!(worker.solve().is_ok());
+    }
 
-        assert_eq!(worker.step(), Ok(DeductionStep {
-            li: LineIndex::Col(4),
-            changes: vec![3]
-        }));
+    #[test]
+    fn easy_puzzle_stairs() {
+        let puzzle = Puzzle::new()
+            .push_row(vec!(2))
+            .push_row(vec!(3))
+            .push_row(vec!(2, 1))
+            .push_row(vec!(2, 1))
+            .push_row(vec!(5))
+            .push_col(vec!(2))
+            .push_col(vec!(3))
+            .push_col(vec!(2, 1))
+            .push_col(vec!(2, 1))
+            .push_col(vec!(5));
 
-        assert_eq!(worker.step(), Err(SolverError::Stuck));
+        let solver = Solver::new();
+        let worker = solver.delegate(&puzzle);
 
-        println!("{}", worker.grid);
+        assert!(worker.solve().is_ok());
+    }
+
+    #[test]
+    fn nonlinear_puzzle_smiley() {
+        let puzzle = Puzzle::new()
+            .push_row(vec!(2, 2))
+            .push_row(vec!(2, 2))
+            .push_row(vec!())
+            .push_row(vec!(1, 1))
+            .push_row(vec!(3))
+            .push_col(vec!(2, 1))
+            .push_col(vec!(2, 1))
+            .push_col(vec!(1))
+            .push_col(vec!(2, 1))
+            .push_col(vec!(2, 1));
+
+        let solver = Solver::new();
+        let worker = solver.delegate(&puzzle);
+
+        assert_eq!(worker.solve(), Err(SolverError::Stuck));
     }
 }
 

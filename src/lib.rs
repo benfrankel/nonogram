@@ -4,4 +4,5 @@ extern crate ndarray;
 mod model;
 mod solver;
 
-use model::Puzzle;
+pub use model::Puzzle;
+pub use solver::Solver;
